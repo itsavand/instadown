@@ -316,6 +316,17 @@ async def handle_media(client: Client, message: Message):
 def main():
     """Main entry point"""
     logger.info("Starting Instagram Downloader Bot...")
+
+    # Check for COOKIES_CONTENT environment variable (for Railway/Render support)
+    cookies_content = os.getenv("COOKIES_CONTENT")
+    if cookies_content:
+        logger.info("Found COOKIES_CONTENT env var, writing to cookies.txt")
+        try:
+            with open("cookies.txt", "w") as f:
+                f.write(cookies_content)
+        except Exception as e:
+            logger.error(f"Failed to write cookies.txt from env var: {e}")
+
     logger.info(f"Download directory: {DOWNLOAD_DIR.absolute()}")
     logger.info(f"Cookies file: {'Found' if COOKIES_FILE.exists() else 'Not found'}")
     
