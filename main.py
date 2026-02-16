@@ -67,8 +67,10 @@ def get_yt_dlp_options(output_path: str) -> dict:
         'no_warnings': False,
         'extract_flat': False,
         'nocheckcertificate': True,
-        # Use mobile user agent for stories
-        'user_agent': 'Instagram 219.0.0.12.117 Android (31/12; 320dpi; 1080x2260; samsung; SM-G991B; o1s; exynos2100; en_US; 340986161)',
+        # Use standard desktop user agent to match cookies
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        # Add referer to mimic browser behavior
+        'referer': 'https://www.instagram.com/',
     }
     
     # Add cookies file if it exists (for stories and private content)
@@ -101,20 +103,36 @@ async def download_instagram_video(url: str) -> Optional[Path]:
     
     ydl_opts = get_yt_dlp_options(output_template)
     
-    # Download in a thread pool to avoid blocking
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        None,
-        lambda: yt_dlp.YoutubeDL(ydl_opts).download([url])
-    )
-    
-    # Find the downloaded file (yt-dlp adds extension automatically)
-    downloaded_files = list(DOWNLOAD_DIR.glob(f"instagram_{int(timestamp)}.*"))
-    
-    if downloaded_files:
-        return downloaded_files[0]
-    else:
-        raise Exception("Download completed but file not found")
+    try:
+        # Download in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: yt_dlp.YoutubeDL(ydl_opts).download([url])
+        )
+        
+        # Find the downloaded file (yt-dlp adds extension automatically)
+        downloaded_files = list(DOWNLOAD_DIR.glob(f"instagram_{int(timestamp)}.*"))
+        
+        if downloaded_files:
+            return downloaded_files[0]
+        else:
+            raise Exception("Download completed but file not found")
+            
+    except yt_dlp.utils.DownloadError as e:
+        error_msg = str(e)
+        logger.error(f"yt-dlp download error: {error_msg}")
+        
+        if "unreachable" in error_msg.lower() or "login" in error_msg.lower() or "sign in" in error_msg.lower():
+            raise Exception("⚠️ **Cookies Expired or Invalid**\n\nPlease update your `cookies.txt` file.\nSee COOKIES_REFRESH_GUIDE.md for instructions.")
+        elif "video unavailable" in error_msg.lower():
+             raise Exception("⚠️ **Content Unavailable**\n\nThe story/video might have been deleted or is private.")
+        else:
+            raise Exception(f"Download error: {error_msg}")
+            
+    except Exception as e:
+        logger.error(f"Unexpected error during download: {e}")
+        raise e
 
 
 async def cleanup_file(file_path: Path):
