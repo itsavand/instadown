@@ -1,0 +1,28 @@
+# Quick Railway Deployment - 3 Files Only
+
+## Files to Upload to Railway:
+
+```
+1. main.py
+2. requirements.txt  
+3. Procfile
+```
+
+## DO NOT Upload:
+- .env (add as environment variables instead)
+- .gitignore
+- README.md
+- Any .session files
+- downloads/ folder
+- cookies.txt
+- Any .md guide files
+
+## Environment Variables to Add in Railway Dashboard:
+
+```
+API_ID = 36951717
+API_HASH = 13405f871122ae285fc67b325dfc773e
+BOT_TOKEN = 8590842038:AAEBFA9qG8aUTQYcybFrtTEtTWgtAkXVp_I
+```
+
+That's it! Railway will handle the rest automatically.
