@@ -62,18 +62,16 @@ def get_yt_dlp_options(output_path: str) -> dict:
     """
     options = {
         'outtmpl': output_path,
-        'format': 'best',
+        # 'format': 'best', # Commented out to allow images/mixed content
         'quiet': False,
         'no_warnings': False,
         'extract_flat': False,
         'nocheckcertificate': True,
+        'ignoreerrors': True, # Continue even if one file fails
         # Use standard desktop user agent to match cookies
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         # Add referer to mimic browser behavior
         'referer': 'https://www.instagram.com/',
-        # Post-processor to ensure compatible video format if needed, but 'best' usually works.
-        # Ensure we download both video and images if present
-        'writethumbnail': False, 
     }
     
     # Add cookies file if it exists (for stories and private content)
