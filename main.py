@@ -227,10 +227,10 @@ async def handle_message(client: Client, message: Message):
         return
     
     # Send processing message
-    status_msg = await message.reply_text("⏳ Downloading your video... Please wait.")
+    status_msg = await message.reply_text("⏳ Downloading content... Please wait.")
     
     try:
-        # Download the video
+        # Download the content
         file_path = await download_instagram_video(url)
         
         if not file_path:
@@ -261,16 +261,31 @@ async def handle_message(client: Client, message: Message):
         
         # Update status
         await status_msg.edit_text(
-            f"⬆️ Uploading video ({file_size_mb:.2f} MB)...\n"
+            f"⬆️ Sending content ({file_size_mb:.2f} MB)...\n"
             "This may take a while for large files."
         )
         
-        # Send the video to user
-        await message.reply_video(
-            video=str(file_path),
-            caption=f"✅ Downloaded from Instagram\n📦 Size: {file_size_mb:.2f} MB",
-            supports_streaming=True
-        )
+        # Determine content type based on extension
+        extension = file_path.suffix.lower()
+        caption = f"✅ Downloaded from Instagram\n📦 Size: {file_size_mb:.2f} MB"
+        
+        if extension in ['.jpg', '.jpeg', '.png', '.webp']:
+            await message.reply_photo(
+                photo=str(file_path),
+                caption=caption
+            )
+        elif extension in ['.mp4', '.mov', '.avi', '.mkv']:
+            await message.reply_video(
+                video=str(file_path),
+                caption=caption,
+                supports_streaming=True
+            )
+        else:
+            # Fallback for other formats (like audio or unknown)
+            await message.reply_document(
+                document=str(file_path),
+                caption=caption
+            )
         
         # Delete status message
         await status_msg.delete()
@@ -281,7 +296,7 @@ async def handle_message(client: Client, message: Message):
         logger.info(f"Successfully processed request for user {message.from_user.id}")
         
     except Exception as e:
-        logger.error(f"Error processing request: {e}")
+        logger.error(f"Error processing request: {e}", exc_info=True)
         await status_msg.edit_text(
             f"❌ **An error occurred:**\n`{str(e)}`\n\n"
             "Please try again or contact support."
