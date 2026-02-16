@@ -1,0 +1,9 @@
+# Telegram Bot Framework
+pyrogram>=2.0.106
+TgCrypto>=1.2.5
+
+# Download Engine
+yt-dlp>=2024.1.1
+
+# Utilities
+python-dotenv>=1.0.0
