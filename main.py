@@ -67,8 +67,8 @@ def get_yt_dlp_options(output_path: str) -> dict:
         'no_warnings': False,
         'extract_flat': False,
         'nocheckcertificate': True,
-        # Add user agent to avoid some blocks
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        # Use mobile user agent for stories
+        'user_agent': 'Instagram 219.0.0.12.117 Android (31/12; 320dpi; 1080x2260; samsung; SM-G991B; o1s; exynos2100; en_US; 340986161)',
     }
     
     # Add cookies file if it exists (for stories and private content)
@@ -90,7 +90,10 @@ async def download_instagram_video(url: str) -> Optional[Path]:
         url: Instagram URL (post, reel, or story)
         
     Returns:
-        Path to downloaded file or None if failed
+        Path to downloaded file
+    
+    Raises:
+        Exception: If download fails
     """
     # Generate unique filename based on timestamp
     timestamp = asyncio.get_event_loop().time()
@@ -98,29 +101,20 @@ async def download_instagram_video(url: str) -> Optional[Path]:
     
     ydl_opts = get_yt_dlp_options(output_template)
     
-    try:
-        # Download in a thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: yt_dlp.YoutubeDL(ydl_opts).download([url])
-        )
-        
-        # Find the downloaded file (yt-dlp adds extension automatically)
-        downloaded_files = list(DOWNLOAD_DIR.glob(f"instagram_{int(timestamp)}.*"))
-        
-        if downloaded_files:
-            return downloaded_files[0]
-        else:
-            logger.error("Download completed but file not found")
-            return None
-            
-    except yt_dlp.utils.DownloadError as e:
-        logger.error(f"yt-dlp download error: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error during download: {e}")
-        return None
+    # Download in a thread pool to avoid blocking
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        lambda: yt_dlp.YoutubeDL(ydl_opts).download([url])
+    )
+    
+    # Find the downloaded file (yt-dlp adds extension automatically)
+    downloaded_files = list(DOWNLOAD_DIR.glob(f"instagram_{int(timestamp)}.*"))
+    
+    if downloaded_files:
+        return downloaded_files[0]
+    else:
+        raise Exception("Download completed but file not found")
 
 
 async def cleanup_file(file_path: Path):
@@ -232,18 +226,6 @@ async def handle_message(client: Client, message: Message):
     try:
         # Download the content
         file_path = await download_instagram_video(url)
-        
-        if not file_path:
-            await status_msg.edit_text(
-                "❌ **Download failed!**\n\n"
-                "Possible reasons:\n"
-                "• Invalid or expired link\n"
-                "• Private content (requires cookies.txt)\n"
-                "• Content unavailable\n"
-                "• Rate limited by Instagram\n\n"
-                "Please try again or contact support."
-            )
-            return
         
         # Check file size (Telegram limit with bot API is 50MB, with MTProto is 2GB)
         file_size = file_path.stat().st_size
