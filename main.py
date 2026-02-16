@@ -68,9 +68,11 @@ def get_yt_dlp_options(output_path: str) -> dict:
         'extract_flat': False,
         'nocheckcertificate': True,
         'ignoreerrors': True, # Continue even if one file fails
-        # Use standard desktop user agent to match cookies
+        'skip_download': False,
+        # Ensure we download thumbnails (often how images are served for some types)
+        'writethumbnail': True,
+        # Trust me, some images are only grabbed this way in yt-dlp for insta
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        # Add referer to mimic browser behavior
         'referer': 'https://www.instagram.com/',
     }
     
