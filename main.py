@@ -71,6 +71,9 @@ def get_yt_dlp_options(output_path: str) -> dict:
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         # Add referer to mimic browser behavior
         'referer': 'https://www.instagram.com/',
+        # Post-processor to ensure compatible video format if needed, but 'best' usually works.
+        # Ensure we download both video and images if present
+        'writethumbnail': False, 
     }
     
     # Add cookies file if it exists (for stories and private content)
@@ -84,22 +87,25 @@ def get_yt_dlp_options(output_path: str) -> dict:
     return options
 
 
-async def download_instagram_video(url: str) -> Optional[Path]:
+async def download_instagram_video(url: str) -> List[Path]:
     """
-    Download Instagram video using yt-dlp
+    Download Instagram content using yt-dlp.
+    Supports posts, reels, stories, and carousels (multiple items).
     
     Args:
-        url: Instagram URL (post, reel, or story)
+        url: Instagram URL
         
     Returns:
-        Path to downloaded file
+        List of paths to downloaded files
     
     Raises:
-        Exception: If download fails
+        Exception: If download fails or no files are found
     """
-    # Generate unique filename based on timestamp
-    timestamp = asyncio.get_event_loop().time()
-    output_template = str(DOWNLOAD_DIR / f"instagram_{int(timestamp)}.%(ext)s")
+    # Generate unique timestamp for this download batch
+    timestamp = str(int(asyncio.get_event_loop().time()))
+    
+    # Use %(id)s to ensure unique filenames for carousels/multiple items
+    output_template = str(DOWNLOAD_DIR / f"instagram_{timestamp}_%(id)s.%(ext)s")
     
     ydl_opts = get_yt_dlp_options(output_template)
     
@@ -111,13 +117,17 @@ async def download_instagram_video(url: str) -> Optional[Path]:
             lambda: yt_dlp.YoutubeDL(ydl_opts).download([url])
         )
         
-        # Find the downloaded file (yt-dlp adds extension automatically)
-        downloaded_files = list(DOWNLOAD_DIR.glob(f"instagram_{int(timestamp)}.*"))
+        # Find all downloaded files matching this timestamp
+        # We use glob to find files starting with the timestamp prefix
+        downloaded_files = list(DOWNLOAD_DIR.glob(f"instagram_{timestamp}_*"))
+        
+        # Filter out `.part` files if any exist (incomplete downloads)
+        downloaded_files = [f for f in downloaded_files if f.suffix != '.part']
         
         if downloaded_files:
-            return downloaded_files[0]
+            return downloaded_files
         else:
-            raise Exception("Download completed but file not found")
+            raise Exception("Download completed but no files were found")
             
     except yt_dlp.utils.DownloadError as e:
         error_msg = str(e)
@@ -135,19 +145,20 @@ async def download_instagram_video(url: str) -> Optional[Path]:
         raise e
 
 
-async def cleanup_file(file_path: Path):
+async def cleanup_files(file_paths: List[Path]):
     """
-    Delete file after sending
+    Delete files after sending
     
     Args:
-        file_path: Path to file to delete
+        file_paths: List of paths to files to delete
     """
-    try:
-        if file_path.exists():
-            file_path.unlink()
-            logger.info(f"Deleted file: {file_path}")
-    except Exception as e:
-        logger.error(f"Error deleting file {file_path}: {e}")
+    for file_path in file_paths:
+        try:
+            if file_path.exists():
+                file_path.unlink()
+                logger.info(f"Deleted file: {file_path}")
+        except Exception as e:
+            logger.error(f"Error deleting file {file_path}: {e}")
 
 
 def is_instagram_url(text: str) -> bool:
@@ -175,13 +186,14 @@ async def start_command(client: Client, message: Message):
     """Handle /start command"""
     welcome_text = (
         "👋 **Welcome to Instagram Downloader Bot!**\n\n"
-        "📹 Send me an Instagram link and I'll download the video for you.\n\n"
+        "📹 Send me an Instagram link and I'll download it for you.\n\n"
         "**Supported content:**\n"
-        "• Posts (videos)\n"
+        "• Posts (videos & photos)\n"
         "• Reels\n"
-        "• Stories (requires authentication)\n\n"
-        "**Just send me a link and I'll do the rest!**\n\n"
-        "⚠️ Note: For private stories, make sure cookies.txt is configured."
+        "• Stories (requires cookies)\n"
+        "• Carousels (multiple items)\n\n"
+        "**Just send me a link!**\n\n"
+        "⚠️ Note: For private stories, set `COOKIES_CONTENT` env var."
     )
     await message.reply_text(welcome_text)
 
@@ -193,16 +205,13 @@ async def help_command(client: Client, message: Message):
         "ℹ️ **How to use this bot:**\n\n"
         "1️⃣ Copy an Instagram link (post, reel, or story)\n"
         "2️⃣ Send it to me\n"
-        "3️⃣ Wait while I download it\n"
-        "4️⃣ Receive your video!\n\n"
+        "3️⃣ Receive your media!\n\n"
         "**Supported formats:**\n"
         "• https://www.instagram.com/p/...\n"
         "• https://www.instagram.com/reel/...\n"
         "• https://www.instagram.com/stories/...\n\n"
-        "**Limits:**\n"
-        "• Maximum file size: 2GB\n"
-        "• Private content requires cookies.txt configuration\n\n"
-        "Need help? Contact the bot administrator."
+        "**Setup:**\n"
+        "If stories fail, see RAILWAY_COOKIES_GUIDE.md to setup cookies."
     )
     await message.reply_text(help_text)
 
@@ -241,66 +250,90 @@ async def handle_message(client: Client, message: Message):
     # Send processing message
     status_msg = await message.reply_text("⏳ Downloading content... Please wait.")
     
+    downloaded_files = []
+    
     try:
-        # Download the content
-        file_path = await download_instagram_video(url)
+        # Download the content (returns a list of paths)
+        downloaded_files = await download_instagram_video(url)
         
-        # Check file size (Telegram limit with bot API is 50MB, with MTProto is 2GB)
-        file_size = file_path.stat().st_size
-        file_size_mb = file_size / (1024 * 1024)
+        # Calculate total size
+        total_size = sum(f.stat().st_size for f in downloaded_files)
+        total_size_mb = total_size / (1024 * 1024)
         
-        logger.info(f"File downloaded: {file_path.name} ({file_size_mb:.2f} MB)")
-        
-        if file_size > 2 * 1024 * 1024 * 1024:  # 2GB
+        # Check total size limit (2GB)
+        if total_size > 2 * 1024 * 1024 * 1024:
             await status_msg.edit_text(
-                f"❌ File is too large ({file_size_mb:.2f} MB).\n"
-                "Maximum supported size is 2GB."
+                f"❌ Total content size is too large ({total_size_mb:.2f} MB).\n"
+                "Maximum supported total size is 2GB."
             )
-            await cleanup_file(file_path)
+            await cleanup_files(downloaded_files)
             return
         
         # Update status
         await status_msg.edit_text(
-            f"⬆️ Sending content ({file_size_mb:.2f} MB)...\n"
-            "This may take a while for large files."
+            f"⬆️ Uploading {len(downloaded_files)} item(s) ({total_size_mb:.2f} MB)..."
         )
         
-        # Determine content type based on extension
-        extension = file_path.suffix.lower()
-        caption = f"✅ Downloaded from Instagram\n📦 Size: {file_size_mb:.2f} MB"
-        
-        if extension in ['.jpg', '.jpeg', '.png', '.webp']:
-            await message.reply_photo(
-                photo=str(file_path),
-                caption=caption
-            )
-        elif extension in ['.mp4', '.mov', '.avi', '.mkv']:
-            await message.reply_video(
-                video=str(file_path),
-                caption=caption,
-                supports_streaming=True
-            )
-        else:
-            # Fallback for other formats (like audio or unknown)
-            await message.reply_document(
-                document=str(file_path),
-                caption=caption
-            )
+        # Send each file
+        for i, file_path in enumerate(downloaded_files):
+            file_size_mb = file_path.stat().st_size / (1024 * 1024)
+            extension = file_path.suffix.lower()
+            caption = f"✅ Item {i+1}/{len(downloaded_files)} | 📦 {file_size_mb:.2f} MB"
+            
+            try:
+                if extension in ['.jpg', '.jpeg', '.png', '.webp']:
+                    await message.reply_photo(
+                        photo=str(file_path),
+                        caption=caption
+                    )
+                elif extension in ['.mp4', '.mov', '.avi', '.mkv']:
+                    await message.reply_video(
+                        video=str(file_path),
+                        caption=caption,
+                        supports_streaming=True
+                    )
+                else:
+                    await message.reply_document(
+                        document=str(file_path),
+                        caption=caption
+                    )
+            except Exception as send_e:
+                logger.error(f"Error sending file {file_path}: {send_e}")
+                await message.reply_text(f"❌ Failed to send item {i+1}: {file_path.name}")
         
         # Delete status message
         await status_msg.delete()
         
-        # Clean up the downloaded file
-        await cleanup_file(file_path)
+        # Clean up the downloaded files
+        await cleanup_files(downloaded_files)
         
-        logger.info(f"Successfully processed request for user {message.from_user.id}")
+        logger.info(f"Successfully processed request for user {message.from_user.id}: {len(downloaded_files)} files processed.")
+            
+    except yt_dlp.utils.DownloadError as e:
+        error_msg = str(e)
+        logger.error(f"yt-dlp download error: {error_msg}")
         
+        # Check for authentication errors
+        if "unreachable" in error_msg.lower() or "login" in error_msg.lower() or "sign in" in error_msg.lower():
+            await status_msg.edit_text(
+                "⚠️ **Cookies Expired or Invalid**\n\n"
+                "Please update your `COOKIES_CONTENT` variable in Railway.\n"
+                "See `RAILWAY_COOKIES_GUIDE.md` for instructions."
+            )
+        elif "video unavailable" in error_msg.lower():
+             await status_msg.edit_text("⚠️ **Content Unavailable**\n\nThe story/video might have been deleted or is private.")
+        else:
+            await status_msg.edit_text(f"❌ **Download Error:**\n`{error_msg[:100]}...`") # limit error length
+            
     except Exception as e:
-        logger.error(f"Error processing request: {e}", exc_info=True)
+        logger.error(f"Unexpected error: {e}", exc_info=True)
         await status_msg.edit_text(
             f"❌ **An error occurred:**\n`{str(e)}`\n\n"
             "Please try again or contact support."
         )
+        # Ensure cleanup on error
+        if downloaded_files:
+            await cleanup_files(downloaded_files)
 
 
 @app.on_message(filters.video | filters.document)
