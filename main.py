@@ -69,9 +69,8 @@ def get_yt_dlp_options(output_path: str) -> dict:
         'nocheckcertificate': True,
         'ignoreerrors': True, # Continue even if one file fails
         'skip_download': False,
-        # Ensure we download thumbnails (often how images are served for some types)
-        'writethumbnail': True,
-        # Trust me, some images are only grabbed this way in yt-dlp for insta
+        # Disable thumbnails/images as per user request
+        'writethumbnail': False,
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'referer': 'https://www.instagram.com/',
     }
@@ -133,6 +132,7 @@ async def download_instagram_video(url: str) -> List[Path]:
         error_msg = str(e)
         logger.error(f"yt-dlp download error: {error_msg}")
         
+        # Check for authentication errors
         if "unreachable" in error_msg.lower() or "login" in error_msg.lower() or "sign in" in error_msg.lower():
             raise Exception("⚠️ **Cookies Expired or Invalid**\n\nPlease update your `cookies.txt` file.\nSee COOKIES_REFRESH_GUIDE.md for instructions.")
         elif "video unavailable" in error_msg.lower():
@@ -162,22 +162,13 @@ async def cleanup_files(file_paths: List[Path]):
 
 
 def is_instagram_url(text: str) -> bool:
-    """
-    Check if text contains an Instagram URL
-    
-    Args:
-        text: Text to check
-        
-    Returns:
-        True if text contains Instagram URL
-    """
+    """Check if text contains an Instagram URL"""
     instagram_domains = [
         'instagram.com',
         'www.instagram.com',
         'instagr.am',
         'www.instagr.am'
     ]
-    
     return any(domain in text.lower() for domain in instagram_domains)
 
 
@@ -188,12 +179,11 @@ async def start_command(client: Client, message: Message):
         "👋 **Welcome to Instagram Downloader Bot!**\n\n"
         "📹 Send me an Instagram link and I'll download it for you.\n\n"
         "**Supported content:**\n"
-        "• Posts (videos & photos)\n"
+        "• Posts (videos)\n"
         "• Reels\n"
-        "• Stories (requires cookies)\n"
-        "• Carousels (multiple items)\n\n"
-        "**Just send me a link!**\n\n"
-        "⚠️ Note: For private stories, set `COOKIES_CONTENT` env var."
+        "• Stories\n"
+        "• Carousels\n\n"
+        "**Just send me a link!**"
     )
     await message.reply_text(welcome_text)
 
@@ -210,8 +200,7 @@ async def help_command(client: Client, message: Message):
         "• https://www.instagram.com/p/...\n"
         "• https://www.instagram.com/reel/...\n"
         "• https://www.instagram.com/stories/...\n\n"
-        "**Setup:**\n"
-        "If stories fail, see RAILWAY_COOKIES_GUIDE.md to setup cookies."
+        "Need help? Contact the bot administrator."
     )
     await message.reply_text(help_text)
 
@@ -282,10 +271,8 @@ async def handle_message(client: Client, message: Message):
             
             try:
                 if extension in ['.jpg', '.jpeg', '.png', '.webp']:
-                    await message.reply_photo(
-                        photo=str(file_path),
-                        caption=caption
-                    )
+                    # Rejection logic for images
+                    await message.reply_text("sorry cannot downloas image just screenshot it for yourself")
                 elif extension in ['.mp4', '.mov', '.avi', '.mkv']:
                     await message.reply_video(
                         video=str(file_path),
